@@ -3,28 +3,36 @@ module CppParser
   , Comment(..)
   , CommentType(..)
   , PP(..)
+  , StrLiteral(..)
   , parseCppFile
   , parseComment
   , parseCppComment
   , parsePP
+  , parseStr
   , parseContent
   ) where
 
 import Control.Monad.State
+import Data.Char (chr)
 import Data.Functor.Identity
+import Numeric (readHex)
 import Text.Parsec
 
 type CppFileParser = Parsec String CppFile
 
 data CppFile = CppFile
-  { filePath   :: FilePath   -- Source file path
-  , anomalies  :: [Anomaly]  -- Parsing anomalies such as unclosed comments
-  , comments   :: [Comment]  -- All comments in the file
-  , pps        :: [PP]       -- All preprocessor directives
+  { filePath   :: FilePath     -- Source file path
+  , anomalies  :: [Anomaly]    -- Parsing anomalies such as unclosed comments
+  , comments   :: [Comment]    -- All comments in the file
+  , pps        :: [PP]         -- All preprocessor directives
+  , strs       :: [StrLiteral] -- All preprocessor directives
   } deriving (Show)
 
-data Anomaly = Normaly                  -- It is OK
-             | UnclosedComment Comment  -- Position of unclosed comment
+data Anomaly = Normaly                    -- It is OK
+             | UnclosedComment Comment    -- Position of unclosed comment
+             | BadEscape SourcePos        -- Position of bad escape sequence
+             | UnterminatedStr SourcePos  -- Position of unterminated string
+             | MalformedString StrLiteral -- Position of malformed string
              deriving (Show)
 
 data Comment = Comment
@@ -43,6 +51,14 @@ data PP = PP
   , ppText :: String       -- Content of the preprocessor
   } deriving (Show)
 
+data StrLiteral = StrLiteral
+  { strPos   :: SourcePos  -- Starting position in source
+  , strText  :: String     -- Content of a string
+  , isStrBad :: Bool       -- Flag indicating str is malformed
+  } deriving (Show)
+
+
+
 addAnomaly :: Anomaly -> CppFileParser ()
 addAnomaly anomaly = do
   updateState $ \file -> file { anomalies = anomaly : anomalies file }
@@ -56,6 +72,13 @@ addPP :: PP -> CppFileParser ()
 addPP pp = do
   updateState $ \file -> file { pps = pp : pps file }
 
+addStr :: StrLiteral -> CppFileParser ()
+addStr s = do
+  updateState $ \file -> file { strs = s : strs file }
+  when (isStrBad s) $ addAnomaly $ MalformedString s
+
+
+
 slashedEol :: ParsecT String u Identity Char
 slashedEol = try $ do
   _ <- char '\\'
@@ -64,10 +87,18 @@ slashedEol = try $ do
 cppWhitespace :: CppFileParser ()
 cppWhitespace = skipMany $ space <|> slashedEol
 
-cppAnyChar :: CppFileParser Char
-cppAnyChar = do
+withSlashedEol :: CppFileParser a -> CppFileParser a
+withSlashedEol p = do
   void $ many slashedEol
-  anyChar
+  p
+
+cppAnyChar :: CppFileParser Char
+cppAnyChar = withSlashedEol anyChar
+
+cppChar :: Char -> CppFileParser Char
+cppChar c = withSlashedEol $ char c
+
+
 
 parseComment :: CppFileParser Comment
 parseComment = do
@@ -103,7 +134,7 @@ parsePP = do
 
   cppWhitespace
   pos' <- getPosition
-  _ <- char '#'
+  _ <- cppChar '#'
   cppWhitespace
 
   content <- manyTill cppAnyChar (try (void endOfLine) <|> eof)
@@ -111,10 +142,92 @@ parsePP = do
   addPP pp
   return pp
 
+
+parseEscapeSequence :: CppFileParser Char
+parseEscapeSequence = do
+  pos <- getPosition
+  c <- cppAnyChar  -- Uses your existing function to handle line continuations
+  case c of
+    'n' -> return '\n'
+    't' -> return '\t'
+    'r' -> return '\r'
+    '"' -> return '"'
+    '\\' -> return '\\'
+    '0' -> return '\0'
+    'x' -> parseHexEscape pos 2
+    'u' -> parseHexEscape pos 4
+    _ -> do
+      addAnomaly $ BadEscape pos
+      fail $ "Invalid escape sequence: \\" ++ [c]
+
+parseHexEscape :: SourcePos -> Int -> CppFileParser Char
+parseHexEscape pos n = do
+  hexDigits <- count n hexDigit <|> do
+    addAnomaly $ BadEscape pos
+    fail $ "Expected " ++ show n ++ " hex digits"
+
+  case readHex hexDigits of
+    [(val, "")] -> return $ chr val
+    _ -> do
+      addAnomaly $ BadEscape pos
+      fail $ "Invalid hex value: " ++ hexDigits
+
+parseStr :: CppFileParser StrLiteral
+parseStr = do
+  _ <- cppChar '"'
+  pos <- getPosition
+  (content, isBad) <- try parseOk <|> parseBad
+  let str = StrLiteral pos content isBad
+  addStr str
+  return str
+  where
+    parseOk :: CppFileParser (String, Bool)
+    parseOk = do
+      content <- manyTill goodStrChar $ try $ cppChar '"'
+      return (content, False)
+
+    goodStrChar :: CppFileParser Char
+    goodStrChar = do
+      c <- cppAnyChar
+      if c == '\\' then parseEscapeSequence
+                   else return c
+
+    parseBad :: CppFileParser (String, Bool)
+    parseBad = do
+      content <- manyTill badStrChar badStrTerminated
+      return (content, True)
+
+    badStrChar :: CppFileParser Char
+    badStrChar = do
+      c <- anyChar
+      if c == '\\' then try parseEscapeSequence <|> badEscapeSequence
+                   else return c
+
+    badEscapeSequence :: CppFileParser Char
+    badEscapeSequence = do
+      pos <- getPosition
+      c <- anyChar
+      addAnomaly $ BadEscape pos
+      return c
+
+    badStrTerminated :: CppFileParser ()
+    badStrTerminated = strTerminated <|> nonTerminated
+
+    strTerminated :: CppFileParser ()
+    strTerminated = void $ try $ cppChar '"'
+
+    nonTerminated :: CppFileParser ()
+    nonTerminated = do
+      pos <- getPosition
+      try (void endOfLine) <|> eof
+      addAnomaly $ UnterminatedStr pos
+      return ()
+
 parseTopItem :: CppFileParser ()
 parseTopItem = void (try parseComment)
   <|> void (try parseCppComment)
   <|> void (try parsePP)
+  <|> void (try parseStr)
   <|> void cppAnyChar
 
 parseContent :: CppFileParser CppFile
@@ -132,4 +245,5 @@ parseCppFile path content =
       , anomalies = []
       , comments = []
       , pps = []
+      , strs = []
       }

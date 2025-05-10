@@ -4,7 +4,7 @@ import Data.Functor.Identity
 import Text.Parsec
 import Test.Hspec
 import Wedsa
-import WedsaTesting (parseComment, parseContent, parseCppComment, parsePP)
+import WedsaTesting (parseComment, parseContent, parseCppComment, parsePP, parseStr)
 
 initialState :: CppFile
 initialState = CppFile
@@ -12,6 +12,7 @@ initialState = CppFile
   , anomalies = []
   , comments = []
   , pps = []
+  , strs = []
   }
 
 testRun :: Stream s Identity t => Parsec s CppFile a -> s -> a
@@ -39,6 +40,12 @@ testPP :: String -> String -> Expectation
 testPP input expectedContent = do
   let pp = testRun parsePP input
   ppText pp `shouldBe` expectedContent
+
+testStr :: String -> String -> Bool -> Expectation
+testStr input expectedContent isBad = do
+  let str = testRun parseStr input
+  strText str `shouldBe` expectedContent
+  isStrBad str `shouldBe` isBad
 
 testParseCppFile :: String -> (CppFile -> Expectation) -> Expectation
 testParseCppFile input validator =
@@ -120,6 +127,46 @@ main = hspec $ do
     it "strange preprocessor directive" $ do
       testPP "#de\\\n\\\nfi\\\nne QW\\\nERTY 0" "define QWERTY 0"
 
+
+  describe "parseStr" $ do
+    it "parses an empty string literal" $ do
+      testStr "\"\"" "" False
+
+    it "parses a simple string literal" $ do
+      testStr "\"Hello, world!\"" "Hello, world!" False
+
+    it "parses a string literal with escape sequences" $ do
+      testStr "\"Hello\\nWorld\\t!\"" "Hello\nWorld\t!" False
+
+    it "parses a string literal with escaped quotes" $ do
+      testStr "\"He said \\\"Hello\\\"\"" "He said \"Hello\"" False
+
+    it "parses a string literal with hex escape" $ do
+      testStr "\"\\x41\\x42\\x43\"" "ABC" False
+
+    it "parses a string literal with Unicode escape sequences" $ do
+      testStr "\"Unicode: \\u0041\\u0042\\u0043\"" "Unicode: ABC" False
+
+    it "parses a multiline string literal" $ do
+      testStr "\"\\\n123\\\n456\"" "123456" False
+
+    it "handles unterminated string literals" $ do
+      testStr "\"Unterminated\n" "Unterminated" True
+
+    it "handles unterminated string literals with escaped quot" $ do
+      testStr "\"Unterminated\\\"\n" "Unterminated\"" True
+
+    it "handles bad escape sequence" $ do
+      testStr "\"\\q\"" "q" True
+
+    it "handles bad escape sequence, unterminated" $ do
+      testStr "\"\\q" "q" True
+
+    it "handles bad \\x sequence" $ do
+      testStr "\"\\x1xx" "x1xx" True
+
+    it "handles bad \\u sequence" $ do
+      testStr "\"\\u111u" "u111u" True
 
   describe "parseCppFile" $ do
     it "parses an empty file" $ do
