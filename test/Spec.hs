@@ -4,7 +4,7 @@ import Data.Functor.Identity
 import Text.Parsec
 import Test.Hspec
 import Wedsa
-import WedsaTesting (parseComment, parseContent)
+import WedsaTesting (parseComment, parseContent, parseCppComment)
 
 initialState :: CppFile
 initialState = CppFile
@@ -26,6 +26,13 @@ testCStyleComment input expectedContent isBad = do
   commentType comment `shouldBe` CStyle
   commentText comment `shouldBe` expectedContent
   isCommentBad comment `shouldBe` isBad
+
+testCppStyleComment :: String -> String -> Expectation
+testCppStyleComment input expectedContent = do
+  let comment = testRun parseCppComment input
+  commentType comment `shouldBe` CppStyle
+  commentText comment `shouldBe` expectedContent
+  isCommentBad comment `shouldBe` False
 
 testParseCppFile :: String -> (CppFile -> Expectation) -> Expectation
 testParseCppFile input validator =
@@ -60,6 +67,27 @@ main = hspec $ do
 
     it "fails on malformed comment /*/'" $ do
       testCStyleComment "/*/" "/" True
+
+
+  describe "parseCppComment" $ do
+    it "parses a simple C++ style comment" $ do
+      testCppStyleComment "// Simple comment" " Simple comment"
+
+    it "parses a C++ style comment with spaces" $ do
+      testCppStyleComment "//    Indented comment" "    Indented comment"
+
+    it "parses a C++ style comment until end of line" $ do
+      testCppStyleComment "// Comment\nNext line" " Comment"
+
+    it "parses a C++ style comment with special characters" $ do
+      testCppStyleComment "///// Symbols: !@#$%^&*()" "/// Symbols: !@#$%^&*()"
+
+    it "parses a C++ style comment with Unicode characters" $ do
+      testCppStyleComment "// Über résumé пример 你好" " Über résumé пример 你好"
+
+    it "handles empty C++ style comments" $ do
+      testCppStyleComment "//" ""
+
 
   describe "parseCppFile" $ do
     it "parses an empty file" $ do

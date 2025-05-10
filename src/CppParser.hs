@@ -4,6 +4,7 @@ module CppParser
   , CommentType(..)
   , parseCppFile
   , parseComment
+  , parseCppComment
   , parseContent
   ) where
 
@@ -30,7 +31,8 @@ data Comment = Comment
 } deriving (Show)
 
 data CommentType = CStyle     -- /* ... */
-  deriving (Show, Eq)
+                 | CppStyle   -- // ...
+                 deriving (Show, Eq)
 
 addAnomaly :: Anomaly -> CppFileParser ()
 addAnomaly anomaly = do
@@ -58,8 +60,18 @@ parseComment = do
           content <- manyTill anyChar eof
           return (content, True)
 
+parseCppComment :: CppFileParser Comment
+parseCppComment = do
+  pos <- getPosition
+  _ <- string "//"
+  content <- manyTill anyChar (try (void endOfLine) <|> eof)
+  let comment = Comment CppStyle pos content False  -- C++ comments can't be "bad" (unclosed)
+  addComment comment
+  return comment
+
 parseTopItem :: CppFileParser ()
 parseTopItem = void (try parseComment)
+  <|> void (try parseCppComment)
   <|> void anyChar
 
 parseContent :: CppFileParser CppFile

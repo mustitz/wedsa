@@ -1,5 +1,6 @@
 module WedsaTesting
   ( parseComment
+  , parseCppComment
   , parseContent
   ) where
 
