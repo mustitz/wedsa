@@ -1,6 +1,6 @@
 module Main where
 
-import CppParser
+import Wedsa
 import Text.Parsec (sourceLine, sourceColumn)
 
 prettyPrintComment :: Comment -> IO ()

@@ -2,5 +2,7 @@ cradle:
   cabal:
     - path: "./src"
       component: "lib:wedsa"
+    - path: "./test"
+      component: "test:cppparser-test"
     - path: "./app"
       component: "exe:wedsa"

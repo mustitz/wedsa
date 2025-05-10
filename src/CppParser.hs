@@ -3,6 +3,7 @@ module CppParser
   , Comment(..)
   , CommentType(..)
   , parseCppFile
+  , cStyleComment
   ) where
 
 import Data.Maybe (catMaybes)

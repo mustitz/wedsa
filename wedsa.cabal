@@ -54,12 +54,18 @@ extra-doc-files:    CHANGELOG.md
 common warnings
     ghc-options: -Wall
 
+
+
 library
     -- Import common warning flags.
     import:           warnings
 
     -- Modules exposed by the library.
-    exposed-modules:  CppParser
+    exposed-modules:  Wedsa,
+                      WedsaTesting
+
+    -- Other modules included but not exported
+    other-modules:    CppParser
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.17.2.1,
@@ -70,6 +76,33 @@ library
 
     -- Base language which the package is written in.
     default-language: GHC2021
+
+
+
+test-suite cppparser-test
+    -- Import common warning flags
+    import:           warnings
+
+    -- Type of the test suite (standard exitcode-stdio-1.0 interface)
+    type:             exitcode-stdio-1.0
+
+    -- The main test file
+    main-is:          Spec.hs
+
+    -- Directory containing test files
+    hs-source-dirs:   test
+
+    -- Dependencies for the test suite
+    build-depends:    base ^>=4.17.2.1,
+                      parsec ^>=3.1.16.1,
+                      HUnit ^>=1.6.2.0,
+                      hspec ^>=2.11.7,
+                      wedsa
+
+    -- Base language
+    default-language: GHC2021
+
+
 
 executable wedsa
     -- Import common warning flags.
