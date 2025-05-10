@@ -11,6 +11,7 @@ module CppParser
   ) where
 
 import Control.Monad.State
+import Data.Functor.Identity
 import Text.Parsec
 
 type CppFileParser = Parsec String CppFile
@@ -55,6 +56,19 @@ addPP :: PP -> CppFileParser ()
 addPP pp = do
   updateState $ \file -> file { pps = pp : pps file }
 
+slashedEol :: ParsecT String u Identity Char
+slashedEol = try $ do
+  _ <- char '\\'
+  endOfLine
+
+cppWhitespace :: CppFileParser ()
+cppWhitespace = skipMany $ space <|> slashedEol
+
+cppAnyChar :: CppFileParser Char
+cppAnyChar = do
+  void $ many slashedEol
+  anyChar
+
 parseComment :: CppFileParser Comment
 parseComment = do
   pos <- getPosition
@@ -65,18 +79,18 @@ parseComment = do
   return comment
   where parseClosed :: CppFileParser (String, Bool)
         parseClosed = do
-          content <- manyTill anyChar (try (string "*/"))
+          content <- manyTill cppAnyChar (try (string "*/"))
           return (content, False)
         parseUnclosed :: CppFileParser (String, Bool)
         parseUnclosed = do
-          content <- manyTill anyChar eof
+          content <- manyTill cppAnyChar eof
           return (content, True)
 
 parseCppComment :: CppFileParser Comment
 parseCppComment = do
   pos <- getPosition
   _ <- string "//"
-  content <- manyTill anyChar (try (void endOfLine) <|> eof)
+  content <- manyTill cppAnyChar (try (void endOfLine) <|> eof)
   let comment = Comment CppStyle pos content False  -- C++ comments can't be "bad" (unclosed)
   addComment comment
   return comment
@@ -87,12 +101,12 @@ parsePP = do
   when (sourceColumn pos /= 1) $
     fail "Preprocessor directives must start at the beginning of a line"
 
-  _ <- many (oneOf " \t")
+  cppWhitespace
   pos' <- getPosition
   _ <- char '#'
-  _ <- many (oneOf " \t")
+  cppWhitespace
 
-  content <- manyTill anyChar (try (void endOfLine) <|> eof)
+  content <- manyTill cppAnyChar (try (void endOfLine) <|> eof)
   let pp = PP pos' content
   addPP pp
   return pp
@@ -101,7 +115,7 @@ parseTopItem :: CppFileParser ()
 parseTopItem = void (try parseComment)
   <|> void (try parseCppComment)
   <|> void (try parsePP)
-  <|> void anyChar
+  <|> void cppAnyChar
 
 parseContent :: CppFileParser CppFile
 parseContent = do

@@ -114,6 +114,12 @@ main = hspec $ do
     it "captures directive until end of line" $ do
       testPP "#define PI 3.14159\nint main() {" "define PI 3.14159"
 
+    it "multiline preprocessor directive" $ do
+      testPP "#define QW\\\nERTY 0" "define QWERTY 0"
+
+    it "strange preprocessor directive" $ do
+      testPP "#de\\\n\\\nfi\\\nne QW\\\nERTY 0" "define QWERTY 0"
+
 
   describe "parseCppFile" $ do
     it "parses an empty file" $ do
