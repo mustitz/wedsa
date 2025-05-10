@@ -2,9 +2,11 @@ module CppParser
   ( CppFile(..)
   , Comment(..)
   , CommentType(..)
+  , PP(..)
   , parseCppFile
   , parseComment
   , parseCppComment
+  , parsePP
   , parseContent
   ) where
 
@@ -17,6 +19,7 @@ data CppFile = CppFile
   { filePath   :: FilePath   -- Source file path
   , anomalies  :: [Anomaly]  -- Parsing anomalies such as unclosed comments
   , comments   :: [Comment]  -- All comments in the file
+  , pps        :: [PP]       -- All preprocessor directives
   } deriving (Show)
 
 data Anomaly = Normaly                  -- It is OK
@@ -28,11 +31,16 @@ data Comment = Comment
   , commentPos   :: SourcePos    -- Starting position in source
   , commentText  :: String       -- Content of the comment
   , isCommentBad :: Bool         -- Flag indicating if comment is unclosed
-} deriving (Show)
+  } deriving (Show)
 
 data CommentType = CStyle     -- /* ... */
                  | CppStyle   -- // ...
                  deriving (Show, Eq)
+
+data PP = PP
+  { ppPos  :: SourcePos    -- Starting position in source
+  , ppText :: String       -- Content of the preprocessor
+  } deriving (Show)
 
 addAnomaly :: Anomaly -> CppFileParser ()
 addAnomaly anomaly = do
@@ -42,6 +50,10 @@ addComment :: Comment -> CppFileParser ()
 addComment comment = do
   updateState $ \file -> file { comments = comment : comments file }
   when (isCommentBad comment) $ addAnomaly $ UnclosedComment comment
+
+addPP :: PP -> CppFileParser ()
+addPP pp = do
+  updateState $ \file -> file { pps = pp : pps file }
 
 parseComment :: CppFileParser Comment
 parseComment = do
@@ -69,9 +81,26 @@ parseCppComment = do
   addComment comment
   return comment
 
+parsePP :: CppFileParser PP
+parsePP = do
+  pos <- getPosition
+  when (sourceColumn pos /= 1) $
+    fail "Preprocessor directives must start at the beginning of a line"
+
+  _ <- many (oneOf " \t")
+  pos' <- getPosition
+  _ <- char '#'
+  _ <- many (oneOf " \t")
+
+  content <- manyTill anyChar (try (void endOfLine) <|> eof)
+  let pp = PP pos' content
+  addPP pp
+  return pp
+
 parseTopItem :: CppFileParser ()
 parseTopItem = void (try parseComment)
   <|> void (try parseCppComment)
+  <|> void (try parsePP)
   <|> void anyChar
 
 parseContent :: CppFileParser CppFile
@@ -88,4 +117,5 @@ parseCppFile path content =
       { filePath = path
       , anomalies = []
       , comments = []
+      , pps = []
       }

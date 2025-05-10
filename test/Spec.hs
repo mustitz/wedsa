@@ -4,13 +4,14 @@ import Data.Functor.Identity
 import Text.Parsec
 import Test.Hspec
 import Wedsa
-import WedsaTesting (parseComment, parseContent, parseCppComment)
+import WedsaTesting (parseComment, parseContent, parseCppComment, parsePP)
 
 initialState :: CppFile
 initialState = CppFile
   { filePath = "(test)"
   , anomalies = []
   , comments = []
+  , pps = []
   }
 
 testRun :: Stream s Identity t => Parsec s CppFile a -> s -> a
@@ -33,6 +34,11 @@ testCppStyleComment input expectedContent = do
   commentType comment `shouldBe` CppStyle
   commentText comment `shouldBe` expectedContent
   isCommentBad comment `shouldBe` False
+
+testPP :: String -> String -> Expectation
+testPP input expectedContent = do
+  let pp = testRun parsePP input
+  ppText pp `shouldBe` expectedContent
 
 testParseCppFile :: String -> (CppFile -> Expectation) -> Expectation
 testParseCppFile input validator =
@@ -89,6 +95,26 @@ main = hspec $ do
       testCppStyleComment "//" ""
 
 
+  describe "parsePP" $ do
+    it "parses a basic preprocessor directive" $ do
+      testPP "#include <stdio.h>\n" "include <stdio.h>"
+
+    it "parses a preprocessor directive with whitespace" $ do
+      testPP "  #define MAX 100" "define MAX 100"
+
+    it "parses an empty preprocessor directive" $ do
+      testPP "#" ""
+
+    it "parses a directive with symbols and numbers" $ do
+      testPP "#if (VERSION >= 2)" "if (VERSION >= 2)"
+
+    it "handles multi-word directives" $ do
+      testPP "#pragma once" "pragma once"
+
+    it "captures directive until end of line" $ do
+      testPP "#define PI 3.14159\nint main() {" "define PI 3.14159"
+
+
   describe "parseCppFile" $ do
     it "parses an empty file" $ do
       testParseCppFile "" $ \cppFile ->
@@ -99,3 +125,20 @@ main = hspec $ do
       testParseCppFile (mkCComment commentBody) $ \cppFile -> do
         length (comments cppFile) `shouldBe` 1
         commentText (head $ comments cppFile) `shouldBe` commentBody
+
+    it "parses a file with a preprocessor directive" $ do
+      testParseCppFile "#include <stdio.h>" $ \cppFile -> do
+        length (pps cppFile) `shouldBe` 1
+        ppText (head $ pps cppFile) `shouldBe` "include <stdio.h>"
+
+    it "parses a file with mixed comments and preprocessor directives" $ do
+      let content = "// Header comment\n#include <stdio.h>\n/* Body comment */\n#define MAX 100"
+      testParseCppFile content $ \cppFile -> do
+        length (comments cppFile) `shouldBe` 2
+        length (pps cppFile) `shouldBe` 2
+        ppText (head $ pps cppFile) `shouldBe` "define MAX 100"
+        ppText (pps cppFile !! 1) `shouldBe` "include <stdio.h>"
+
+    it "rejects preprocessor directives not at start of line" $ do
+      testParseCppFile "int main() { #define MAX 100 }" $ \cppFile -> do
+        length (pps cppFile) `shouldBe` 0
