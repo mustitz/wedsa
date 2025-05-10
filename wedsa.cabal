@@ -69,7 +69,8 @@ library
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.17.2.1,
-                      parsec ^>=3.1.16.1
+                      parsec ^>=3.1.16.1,
+                      mtl ^>=2.2.2,
 
     -- Directories containing source files.
     hs-source-dirs:   src

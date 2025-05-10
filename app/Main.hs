@@ -4,8 +4,9 @@ import Wedsa
 import Text.Parsec (sourceLine, sourceColumn)
 
 prettyPrintComment :: Comment -> IO ()
-prettyPrintComment (Comment cType pos content) = do
-  putStrLn $ "Type: " ++ show cType
+prettyPrintComment (Comment cType pos content bad) = do
+  let badStr = if bad then " (bad)" else ""
+  putStrLn $ "Type: " ++ show cType ++ badStr
   putStrLn $ "Position: Line " ++ show (sourceLine pos) ++
              ", Column " ++ show (sourceColumn pos)
   putStrLn $ "Content: " ++ content

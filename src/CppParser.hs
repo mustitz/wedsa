@@ -3,54 +3,77 @@ module CppParser
   , Comment(..)
   , CommentType(..)
   , parseCppFile
-  , cStyleComment
+  , parseComment
+  , parseContent
   ) where
 
-import Data.Maybe (catMaybes)
-import Control.Monad (void)
+import Control.Monad.State
 import Text.Parsec
-import Text.Parsec.String (Parser)
 
-data CppFile = CppFile {
-  filePath   :: FilePath,        -- Source file path
-  comments   :: [Comment],       -- All comments in the file
-  rawContent :: String           -- Original file content (for reference)
+type CppFileParser = Parsec String CppFile
+
+data CppFile = CppFile
+  { filePath   :: FilePath   -- Source file path
+  , anomalies  :: [Anomaly]  -- Parsing anomalies such as unclosed comments
+  , comments   :: [Comment]  -- All comments in the file
+  } deriving (Show)
+
+data Anomaly = Normaly                  -- It is OK
+             | UnclosedComment Comment  -- Position of unclosed comment
+             deriving (Show)
+
+data Comment = Comment
+  { commentType  :: CommentType  -- Type of comment
+  , commentPos   :: SourcePos    -- Starting position in source
+  , commentText  :: String       -- Content of the comment
+  , isCommentBad :: Bool         -- Flag indicating if comment is unclosed
 } deriving (Show)
 
-data Comment = Comment {
-  commentType :: CommentType,  -- Type of comment
-  commentPos  :: SourcePos,    -- Starting position in source
-  commentText :: String        -- Content of the comment
-} deriving (Show)
-
-data CommentType =
-  CStyle     -- /* ... */
+data CommentType = CStyle     -- /* ... */
   deriving (Show, Eq)
 
-cStyleComment :: Parser Comment
-cStyleComment = do
+addAnomaly :: Anomaly -> CppFileParser ()
+addAnomaly anomaly = do
+  updateState $ \file -> file { anomalies = anomaly : anomalies file }
+
+addComment :: Comment -> CppFileParser ()
+addComment comment = do
+  updateState $ \file -> file { comments = comment : comments file }
+  when (isCommentBad comment) $ addAnomaly $ UnclosedComment comment
+
+parseComment :: CppFileParser Comment
+parseComment = do
   pos <- getPosition
   _ <- string "/*"
-  content <- manyTill anyChar $ try $ string "*/"
-  return $ Comment CStyle pos content
+  (content, isUnclosed) <- try parseClosed <|> parseUnclosed
+  let comment = Comment CStyle pos content isUnclosed
+  addComment comment
+  return comment
+  where parseClosed :: CppFileParser (String, Bool)
+        parseClosed = do
+          content <- manyTill anyChar (try (string "*/"))
+          return (content, False)
+        parseUnclosed :: CppFileParser (String, Bool)
+        parseUnclosed = do
+          content <- manyTill anyChar eof
+          return (content, True)
 
-commentOrChar :: Parser (Maybe Comment)
-commentOrChar = (Just <$> try cStyleComment)
-                <|> (void anyChar >> return Nothing)
+parseTopItem :: CppFileParser ()
+parseTopItem = void (try parseComment)
+  <|> void anyChar
 
-commentsParser :: Parser [Comment]
-commentsParser = do
-  results <- many commentOrChar
-  return $ catMaybes results
-
-cppFileParser :: FilePath -> String -> Parser CppFile
-cppFileParser path content = do
-  cmts <- commentsParser
-  return $ CppFile {
-    filePath = path,
-    comments = cmts,
-    rawContent = content
-  }
+parseContent :: CppFileParser CppFile
+parseContent = do
+  void $ many parseTopItem
+  void eof
+  getState
 
 parseCppFile :: FilePath -> String -> Either ParseError CppFile
-parseCppFile path content = parse (cppFileParser path content) path content
+parseCppFile path content =
+  runParser parseContent initialState path content
+  where
+    initialState = CppFile
+      { filePath = path
+      , anomalies = []
+      , comments = []
+      }

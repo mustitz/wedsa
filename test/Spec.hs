@@ -1,32 +1,36 @@
 module Main where
 
+import Data.Functor.Identity
 import Text.Parsec
 import Test.Hspec
 import Wedsa
-import WedsaTesting (cStyleComment)
+import WedsaTesting (parseComment, parseContent)
 
-testCStyleCommentOK :: String -> String -> Expectation
-testCStyleCommentOK input expectedContent = do
-  let result = parse cStyleComment "(test)" input
-  case result of
-    Left err -> error $ "Should parse C-style comment: " ++ show err
-    Right comment -> do
-      commentType comment `shouldBe` CStyle
-      commentText comment `shouldBe` expectedContent
+initialState :: CppFile
+initialState = CppFile
+  { filePath = "(test)"
+  , anomalies = []
+  , comments = []
+  }
 
-testCStyleCommentFails :: String -> Expectation
-testCStyleCommentFails input = do
-  let result = parse cStyleComment "(test)" input
-  case result of
-    Left _ -> return () -- Expected to fail
-    Right _ -> error $ "Parser should fail on malformed input: " ++ input
+testRun :: Stream s Identity t => Parsec s CppFile a -> s -> a
+testRun f input =
+  let result = runParser f initialState "(test)" input
+  in case result of
+    Left err -> error $ "Parser should always parse! Error: " ++ show err
+    Right value -> value
 
-testParseCppFileOK :: String -> (CppFile -> Expectation) -> Expectation
-testParseCppFileOK input validator = do
-  let result = parseCppFile "(test)" input
-  case result of
-    Left err -> error $ "Should parse file: " ++ show err
-    Right cppFile -> validator cppFile
+testCStyleComment :: String -> String -> Bool -> Expectation
+testCStyleComment input expectedContent isBad = do
+  let comment = testRun parseComment input
+  commentType comment `shouldBe` CStyle
+  commentText comment `shouldBe` expectedContent
+  isCommentBad comment `shouldBe` isBad
+
+testParseCppFile :: String -> (CppFile -> Expectation) -> Expectation
+testParseCppFile input validator =
+  let file = testRun parseContent input
+  in validator file
 
 mkCComment :: String -> String
 mkCComment body = "/*" ++ body ++ "*/"
@@ -34,35 +38,36 @@ mkCComment body = "/*" ++ body ++ "*/"
 main :: IO ()
 main = hspec $ do
 
-  describe "cStyleComment" $ do
+  describe "parseComment" $ do
     it "parses an empty comment" $ do
-      testCStyleCommentOK "/**/" ""
+      testCStyleComment "/**/" "" False
 
     it "parses a simple C-style comment" $ do
       let body = " Simple comment "
-      testCStyleCommentOK (mkCComment body) body
+      testCStyleComment (mkCComment body) body False
 
     it "parses a multi-line C-style comment" $ do
       let body = " First line\n   Second line\n   Third line "
-      testCStyleCommentOK (mkCComment body) body
+      testCStyleComment (mkCComment body) body False
 
     it "parses a comment with Unicode characters" $ do
       let body = " Über résumé пример 你好 "
-      testCStyleCommentOK (mkCComment body) body
+      testCStyleComment (mkCComment body) body False
 
     it "fails on unclosed comment" $ do
-      testCStyleCommentFails "/* unclosed comment"
+      let body = " unclosed comment"
+      testCStyleComment ("/*" ++ body) body True
 
     it "fails on malformed comment /*/'" $ do
-      testCStyleCommentFails "/*/"
+      testCStyleComment "/*/" "/" True
 
   describe "parseCppFile" $ do
     it "parses an empty file" $ do
-      testParseCppFileOK "" $ \cppFile ->
+      testParseCppFile "" $ \cppFile ->
         length (comments cppFile) `shouldBe` 0
 
     it "parses a file with a single comment" $ do
       let commentBody = " Test comment "
-      testParseCppFileOK (mkCComment commentBody) $ \cppFile -> do
+      testParseCppFile (mkCComment commentBody) $ \cppFile -> do
         length (comments cppFile) `shouldBe` 1
         commentText (head $ comments cppFile) `shouldBe` commentBody

@@ -1,5 +1,6 @@
 module WedsaTesting
-  ( cStyleComment
+  ( parseComment
+  , parseContent
   ) where
 
 import CppParser
