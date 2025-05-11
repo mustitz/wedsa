@@ -187,10 +187,11 @@ main = hspec $ do
     it "parses a file with mixed comments and preprocessor directives" $ do
       let content = "// Header comment\n#include <stdio.h>\n/* Body comment */\n#define MAX 100"
       testParseCppFile content $ \cppFile -> do
+        let getPPs n = pps cppFile !! n
         length (comments cppFile) `shouldBe` 2
         length (pps cppFile) `shouldBe` 2
-        ppText (head $ pps cppFile) `shouldBe` "define MAX 100"
-        ppText (pps cppFile !! 1) `shouldBe` "include <stdio.h>"
+        ppText (getPPs 0) `shouldBe` "include <stdio.h>"
+        ppText (getPPs 1) `shouldBe` "define MAX 100"
 
     it "rejects preprocessor directives not at start of line" $ do
       testParseCppFile "int main() { #define MAX 100 }" $ \cppFile -> do

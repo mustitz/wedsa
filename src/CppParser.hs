@@ -234,7 +234,12 @@ parseContent :: CppFileParser CppFile
 parseContent = do
   void $ many parseTopItem
   void eof
-  getState
+  file <- getState
+  return $ file
+    { comments = reverse (comments file)
+    , pps = reverse (pps file)
+    , strs = reverse (strs file)
+    }
 
 parseCppFile :: FilePath -> String -> Either ParseError CppFile
 parseCppFile path content =
